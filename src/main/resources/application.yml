@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: qq-study-monitor
+  datasource:
+    url: "jdbc:sqlite:qq-study-monitor.db?busy_timeout=5000&journal_mode=WAL"
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  sql:
+    init:
+      mode: always
+
+server:
+  port: 8080
+
+bot:
+  qq:
+    enabled: true
+    one-bot-web-socket-url: ${ONEBOT_WS_URL:ws://127.0.0.1:3001/}
+    access-token: ${ONEBOT_ACCESS_TOKEN:}
+    self-id: 0
+  limits:
+    image-max-bytes-per-image: ${BOT_IMAGE_MAX_BYTES_PER_IMAGE:5242880}
+    image-max-total-bytes: ${BOT_IMAGE_MAX_TOTAL_BYTES:8388608}
+    private-context-max-messages: ${BOT_PRIVATE_CONTEXT_MAX_MESSAGES:12}
+  study:
+    monitored-group-ids: []
+    teacher-ids: []
+    committee-ids: []
+    reminder-lead-minutes: ${BOT_REMINDER_LEAD_MINUTES:30}
+
+ai:
+  dashscope:
+    model: ${DASHSCOPE_MODEL:qwen3.7-flash}
+    reply-timeout-seconds: ${DASHSCOPE_REPLY_TIMEOUT_SECONDS:90}

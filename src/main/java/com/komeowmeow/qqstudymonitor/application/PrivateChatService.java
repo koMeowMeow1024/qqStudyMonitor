@@ -1,0 +1,106 @@
+package com.komeowmeow.qqstudymonitor.application;
+
+import com.komeowmeow.qqstudymonitor.config.StudyMonitorProperties;
+import com.komeowmeow.qqstudymonitor.infrastructure.persistence.CourseMaterialRepository;
+import com.komeowmeow.qqstudymonitor.infrastructure.persistence.MemberStatusRepository;
+import com.komeowmeow.qqstudymonitor.infrastructure.persistence.PrivateMessageRepository;
+import org.springframework.stereotype.Service;
+
+@Service
+public class PrivateChatService {
+    private final StudyMonitorProperties properties;
+    private final StudyAiService studyAiService;
+    private final PrivateMessageRepository privateMessageRepository;
+    private final MemberStatusRepository memberStatusRepository;
+    private final CourseMaterialRepository courseMaterialRepository;
+
+    public PrivateChatService(
+            StudyMonitorProperties properties,
+            StudyAiService studyAiService,
+            PrivateMessageRepository privateMessageRepository,
+            MemberStatusRepository memberStatusRepository,
+            CourseMaterialRepository courseMaterialRepository) {
+        this.properties = properties;
+        this.studyAiService = studyAiService;
+        this.privateMessageRepository = privateMessageRepository;
+        this.memberStatusRepository = memberStatusRepository;
+        this.courseMaterialRepository = courseMaterialRepository;
+    }
+
+    public String handle(long userId, IncomingMessage message) {
+        if (message.isBlank()) {
+            return "可以发文字、题目截图，或问我「我还没交什么」。";
+        }
+
+        privateMessageRepository.append(userId, "user", message.effectiveText());
+
+        if (isHomeworkStatusQuery(message.text())) {
+            String answer = formatHomeworkStatus(userId);
+            privateMessageRepository.append(userId, "assistant", answer);
+            return answer;
+        }
+
+        long groupId = primaryGroupId();
+        String materials = formatMaterials(groupId);
+        var history = privateMessageRepository.recentForUser(userId);
+        String answer = studyAiService.tutorReply(message, materials, history);
+        privateMessageRepository.append(userId, "assistant", answer);
+        return answer;
+    }
+
+    private String formatHomeworkStatus(long userId) {
+        long groupId = primaryGroupId();
+        if (groupId == 0) {
+            return "尚未配置监控班级群号，请在 application.yml 的 bot.study.monitored-group-ids 中填写。";
+        }
+        var pending = memberStatusRepository.listPendingForUser(groupId, userId);
+        if (pending.isEmpty()) {
+            return "你没有未交的作业记录。";
+        }
+        StringBuilder builder = new StringBuilder("你还未交的作业：\n");
+        for (var row : pending) {
+            builder.append("· ").append(row.title());
+            if (row.dueAt() != null && !row.dueAt().isBlank()) {
+                builder.append("（截止 ").append(row.dueAt()).append('）');
+            }
+            builder.append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String formatMaterials(long groupId) {
+        if (groupId == 0) {
+            return "";
+        }
+        var materials = courseMaterialRepository.listRecent(groupId, 5);
+        if (materials.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (var row : materials) {
+            builder.append('-').append(row.title()).append("：").append(row.content());
+            if (row.sourceNote() != null && !row.sourceNote().isBlank()) {
+                builder.append("（").append(row.sourceNote()).append(')');
+            }
+            builder.append('\n');
+        }
+        return builder.toString();
+    }
+
+    private long primaryGroupId() {
+        return properties.getMonitoredGroupIds().isEmpty()
+                ? 0
+                : properties.getMonitoredGroupIds().getFirst();
+    }
+
+    private static boolean isHomeworkStatusQuery(String text) {
+        if (text == null) {
+            return false;
+        }
+        String normalized = text.replace(" ", "");
+        return normalized.contains("还没交什么")
+                || normalized.contains("未交什么")
+                || normalized.contains("缺什么作业")
+                || normalized.contains("还有什么要交");
+    }
+}

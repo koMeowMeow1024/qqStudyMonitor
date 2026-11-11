@@ -1,6 +1,4 @@
 # qqStudyMonitor
-qq学习委员机器人
-# 学习委员
 
 班级 QQ 群里的学习委员。群里帮老师把通知收成作业并跟到截止，私聊里帮同学看自己的进度、讲学习上的问题。
 
@@ -22,40 +20,81 @@ qq学习委员机器人
 私聊同时做两件事。
 
 - 班务查询：回答「我还没交什么」。只查这个人的作业状态。
-- 学习答疑：回答知识点、习题和题目截图。先指出卡在哪一步，把这一步讲清楚，再留一个同类的小问题。需要交上去的作业仍由学生自己完成。
+- 学习答疑：回答知识点、习题和题目截图。先指出卡在哪一步，把这一步讲清楚，再留一个同类的小问题。
 
-老师发在群里的通知和课件要点，可以整理成这门课的资料，供讲题时引用，并说明来自哪条群消息。资料里没有的课程要求直接说明不确定。
+私聊里的讲题过程和个人计划不进入群上下文，也不进入别人的私聊。
 
-个人复习安排、出发时间和要带的材料记在这个人的私聊里，提醒也只发回这个人。生活相关的内容限于别耽误上课，例如几点出门、材料有没有带。
+## 技术栈
 
-## 隔离
+- Java 21 / Spring Boot 3.5
+- LangChain4j + 通义千问（班务识图、私聊讲题）
+- NapCat OneBot v11 WebSocket
+- SQLite（作业、进度、课程资料、私聊记录）
+- Docker / `docker compose`
 
-- 私聊里的提问、讲题过程和个人计划不进入群上下文，也不进入别人的私聊。
-- 群里的点名只包含完成状态。
-- 同学不能发布或关闭全班任务，也不能修改别人的状态。
+## 配置
 
-## 现场可以走完的一条流程
+密钥与连接信息用环境变量，不要提交 `.env`。
 
-1. 老师把通知截图发进群，机器人回确认卡。
-2. 老师确认后，作业入库。
-3. 两名同学分别标记自己已交。
-4. 有人在群里询问还没交的人。
-5. 一名同学私聊发来题目截图，机器人讲解其中一步并追问。
-6. 同一人接着问自己还缺哪份作业。
-7. 把截止时间拨近，群里收到主动提醒。
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DASHSCOPE_API_KEY` | 百炼 API Key（**必填**） | 无 |
+| `DASHSCOPE_MODEL` | 模型 | `qwen3.7-flash` |
+| `DASHSCOPE_REPLY_TIMEOUT_SECONDS` | 单次调用超时（秒） | `90` |
+| `ONEBOT_WS_URL` | NapCat WebSocket | `ws://127.0.0.1:3001/` |
+| `ONEBOT_ACCESS_TOKEN` | NapCat token | 空 |
+| `BOT_IMAGE_MAX_BYTES_PER_IMAGE` | 单图上限 | 5 MiB |
+| `BOT_IMAGE_MAX_TOTAL_BYTES` | 多图合计上限 | 8 MiB |
+| `BOT_PRIVATE_CONTEXT_MAX_MESSAGES` | 私聊带入历史的条数 | `12` |
+| `BOT_REMINDER_LEAD_MINUTES` | 截止前多少分钟开始催交 | `30` |
 
-## 技术方向
+`src/main/resources/application.yml` 中还需填写（或用 Spring 配置覆盖）：
 
-- Java 21、Spring Boot
-- LangChain4j 调用通义千问，群通知和题目支持识图
-- NapCat，OneBot v11，接入 QQ 群聊和私聊
-- SQLite 保存作业、每人进度、课程资料和私聊记录
-- 定时提醒，Docker 部署
+| 项 | 说明 |
+| --- | --- |
+| `bot.qq.self-id` | 机器人 QQ，用于过滤自身消息和识别 @ |
+| `bot.study.monitored-group-ids` | 班级群号；为空则处理所有群（不建议生产环境留空） |
+| `bot.study.teacher-ids` | 老师 QQ，可发通知生成确认卡 |
+| `bot.study.committee-ids` | 学习委员 QQ，可「确认发布」 |
 
-模型按问题分路：班务问题查任务记录，学习问题走讲题。工具限于建立任务、更新本人状态、查询进度和读取本课资料。
+`monitored-group-ids` 为空时，`isMonitoredGroup` 会放行所有群，仅适合本地调试。
+
+## NapCat
+
+机器人为 **OneBot v11 客户端**，连接 NapCat **正向 WebSocket 服务端**。
+
+1. WebUI → 网络配置 → WebSocket 服务端：`host` 建议 `0.0.0.0`（容器访问用），`port` `3001`，`messagePostFormat` 建议 **`array`**。
+2. 若设置 `token`，须与 `ONEBOT_ACCESS_TOKEN` 一致；鉴权头为 `Authorization: Bearer <token>`。
+3. 连接成功日志：`已连接 NapCat：ws://...`
+
+常用动作：`message` 事件（群/私聊）、`send_group_msg`、`send_private_msg`、`get_msg`、`get_image`。
+
+## 运行
+
+```bash
+# PowerShell
+$env:DASHSCOPE_API_KEY="sk-xxx"
+mvn spring-boot:run
+```
+
+数据库文件默认 `qq-study-monitor.db`（项目根目录）；Docker 下为挂载卷 `data/qq-study-monitor.db`。
+
+部署见 [DEPLOY.md](DEPLOY.md)。
+
+## 数据库表（概要）
+
+| 表 | 用途 |
+| --- | --- |
+| `assignment` | 已发布的作业与截止、是否已提醒 |
+| `assignment_draft` | 待老师/委员确认的草稿 |
+| `assignment_member_status` | 每位同学每项作业的 pending/submitted |
+| `group_member` | 群友名册（催交与点名） |
+| `course_material` | 由群通知整理的资料，供私聊讲题引用 |
+| `private_message` | 私聊问答历史（按 user_id 隔离） |
+
+建表脚本：`src/main/resources/schema.sql`。
 
 ## 范围之外
 
-- 不连接教务系统，不抓取外部题库。
-- 不自动批改，不代替学生提交作业。
-- 不在群里闲聊，不把私聊做成通用生活管家。
+- 不连接教务系统，不自动批改，不代交作业。
+- 不在群里闲聊；私聊不做通用生活管家。

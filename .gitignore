@@ -1,0 +1,14 @@
+.env
+target/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+data/
+napcat/
+*.tar.gz
+.idea/workspace.xml
+.idea/shelf/
+.idea/httpRequests/
+.DS_Store
+Thumbs.db

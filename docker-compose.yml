@@ -1,0 +1,33 @@
+services:
+  bot:
+    build:
+      context: .
+    image: qq-study-monitor:local
+    container_name: qq-study-monitor
+    restart: unless-stopped
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      ONEBOT_WS_URL: ${ONEBOT_WS_URL:-ws://host.docker.internal:3001/}
+      ONEBOT_ACCESS_TOKEN: ${ONEBOT_ACCESS_TOKEN:-}
+      SPRING_DATASOURCE_URL: "jdbc:sqlite:/app/data/qq-study-monitor.db?busy_timeout=5000&journal_mode=WAL"
+      TZ: Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    profiles: ["server"]
+    environment:
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+      WEBUI_TOKEN: ${WEBUI_TOKEN:-napcat}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - ./napcat/QQ:/app/.config/QQ
+      - ./napcat/config:/app/napcat/config

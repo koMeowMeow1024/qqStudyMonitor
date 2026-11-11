@@ -1,0 +1,10 @@
+target/
+data/
+napcat/
+.git/
+.idea/
+*.iml
+*.db
+*.db-shm
+*.db-wal
+.env
