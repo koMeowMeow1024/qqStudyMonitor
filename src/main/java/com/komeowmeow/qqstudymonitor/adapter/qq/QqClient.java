@@ -161,6 +161,12 @@ public class QqClient {
         return callAction("get_image", params);
     }
 
+    public CompletableFuture<JsonNode> getGroupMemberList(long groupId) {
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("group_id", groupId);
+        return callAction("get_group_member_list", params);
+    }
+
     public CompletableFuture<Void> sendGroupMessage(long groupId, String text) {
         return sendMessage("send_group_msg", params -> params.put("group_id", groupId), text);
     }

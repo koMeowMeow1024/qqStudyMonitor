@@ -3,15 +3,15 @@ package com.komeowmeow.qqstudymonitor.infrastructure.persistence;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import com.komeowmeow.qqstudymonitor.application.DueAtNormalizer;
+import com.komeowmeow.qqstudymonitor.application.ReminderWindow;
+
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
 public class AssignmentRepository {
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final JdbcTemplate jdbc;
 
@@ -44,7 +44,6 @@ public class AssignmentRepository {
     }
 
     public List<AssignmentRow> findDueForReminder(LocalDateTime now, int leadMinutes) {
-        LocalDateTime windowEnd = now.plusMinutes(leadMinutes);
         return jdbc.query("""
                 SELECT id, group_id, title, description, due_at, reminded
                 FROM assignment
@@ -56,7 +55,7 @@ public class AssignmentRepository {
                 rs.getString("description"),
                 rs.getString("due_at"),
                 rs.getInt("reminded") != 0)).stream()
-                .filter(row -> shouldRemind(row, now, windowEnd))
+                .filter(row -> ReminderWindow.shouldRemind(parseDue(row.dueAt()), now, leadMinutes))
                 .toList();
     }
 
@@ -64,23 +63,38 @@ public class AssignmentRepository {
         jdbc.update("UPDATE assignment SET reminded = 1 WHERE id = ?", assignmentId);
     }
 
-    private static boolean shouldRemind(AssignmentRow row, LocalDateTime now, LocalDateTime windowEnd) {
-        LocalDateTime due = parseDue(row.dueAt());
-        if (due == null) {
-            return false;
-        }
-        return !due.isAfter(windowEnd) && !due.isBefore(now.minusDays(1));
+    public Optional<AssignmentRow> findLatestPublished(long groupId) {
+        List<AssignmentRow> rows = jdbc.query("""
+                SELECT id, group_id, title, description, due_at, reminded
+                FROM assignment
+                WHERE group_id = ? AND status = 'published'
+                ORDER BY id DESC
+                LIMIT 1
+                """, (rs, rowNum) -> new AssignmentRow(
+                rs.getLong("id"),
+                rs.getLong("group_id"),
+                rs.getString("title"),
+                rs.getString("description"),
+                rs.getString("due_at"),
+                rs.getInt("reminded") != 0), groupId);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
+    }
+
+    public boolean closePublished(long assignmentId) {
+        int updated = jdbc.update(
+                "UPDATE assignment SET status = 'closed' WHERE id = ? AND status = 'published'",
+                assignmentId);
+        return updated > 0;
+    }
+
+    public boolean closeLatestPublished(long groupId) {
+        return findLatestPublished(groupId)
+                .map(row -> closePublished(row.id()))
+                .orElse(false);
     }
 
     public static LocalDateTime parseDue(String dueAt) {
-        if (dueAt == null || dueAt.isBlank()) {
-            return null;
-        }
-        try {
-            return LocalDateTime.parse(dueAt.trim(), FORMATTER);
-        } catch (DateTimeParseException ignored) {
-            return null;
-        }
+        return DueAtNormalizer.parse(dueAt);
     }
 
     public record AssignmentRow(

@@ -9,6 +9,11 @@ services:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
       ONEBOT_WS_URL: ${ONEBOT_WS_URL:-ws://host.docker.internal:3001/}
       ONEBOT_ACCESS_TOKEN: ${ONEBOT_ACCESS_TOKEN:-}
+      BOT_SELF_ID: ${BOT_SELF_ID:-0}
+      BOT_MONITORED_GROUP_IDS: ${BOT_MONITORED_GROUP_IDS:-}
+      BOT_TEACHER_IDS: ${BOT_TEACHER_IDS:-}
+      BOT_COMMITTEE_IDS: ${BOT_COMMITTEE_IDS:-}
+      BOT_REMINDER_LEAD_MINUTES: ${BOT_REMINDER_LEAD_MINUTES:-30}
       SPRING_DATASOURCE_URL: "jdbc:sqlite:/app/data/qq-study-monitor.db?busy_timeout=5000&journal_mode=WAL"
       TZ: Asia/Shanghai
     extra_hosts:

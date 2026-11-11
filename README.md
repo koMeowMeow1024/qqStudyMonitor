@@ -8,10 +8,10 @@
 
 只处理班务，由老师或指定的学习委员账号发布和关闭。
 
-- 老师发送文字或通知截图。机器人整理出要做什么、截止时间，先回一张确认卡，确认后才写入。
-- 同学 @ 它说「我交了」，只修改自己的状态。
-- 有人问「还没交的有谁」，按群友名册点名，只显示交没交。
-- 到截止时间，由定时任务主动在群里提醒。
+- 老师或委员发送文字或通知截图（可以 @ 机器人）。机器人整理出要做什么、截止时间，先回一张确认卡，确认后才写入；「关闭作业」结束唯一进行中的班务，多项时写上标题。
+- 同学 @ 它说「我交了」。只有一项进行中作业时只改自己的状态；有多项时需带上作业标题。
+- 有人问「还没交的有谁」，按群友名册点名，只显示交没交（启动后与每次发布前会通过 OneBot 同步群成员名册）。
+- 截止前 `BOT_REMINDER_LEAD_MINUTES` 分钟内，由定时任务在群里催交。
 
 看不清的时间、地点或事项会追问。不编造截止日期，不替老师判断成绩。
 
@@ -19,7 +19,7 @@
 
 私聊同时做两件事。
 
-- 班务查询：回答「我还没交什么」。只查这个人的作业状态。
+- 班务查询：回答「我还没交什么」。只查这个人在已监控班级群里的作业状态；配置了多个群时会一并列出。
 - 学习答疑：回答知识点、习题和题目截图。先指出卡在哪一步，把这一步讲清楚，再留一个同类的小问题。
 
 私聊里的讲题过程和个人计划不进入群上下文，也不进入别人的私聊。
@@ -47,15 +47,19 @@
 | `BOT_IMAGE_MAX_TOTAL_BYTES` | 多图合计上限 | 8 MiB |
 | `BOT_PRIVATE_CONTEXT_MAX_MESSAGES` | 私聊带入历史的条数 | `12` |
 | `BOT_REMINDER_LEAD_MINUTES` | 截止前多少分钟开始催交 | `30` |
+| `BOT_SELF_ID` | 机器人 QQ | `0` |
+| `BOT_MONITORED_GROUP_IDS` | 班级群号，逗号分隔 | 空 |
+| `BOT_TEACHER_IDS` | 老师 QQ，逗号分隔 | 空 |
+| `BOT_COMMITTEE_IDS` | 学习委员 QQ，逗号分隔 | 空 |
 
-`src/main/resources/application.yml` 中还需填写（或用 Spring 配置覆盖）：
+`application.yml` 中上述 `bot.*` 项已支持用同名环境变量覆盖（Docker 见 `.env`）。
 
 | 项 | 说明 |
 | --- | --- |
-| `bot.qq.self-id` | 机器人 QQ，用于过滤自身消息和识别 @ |
-| `bot.study.monitored-group-ids` | 班级群号；为空则处理所有群（不建议生产环境留空） |
-| `bot.study.teacher-ids` | 老师 QQ，可发通知生成确认卡 |
-| `bot.study.committee-ids` | 学习委员 QQ，可「确认发布」 |
+| `bot.qq.self-id` | 同 `BOT_SELF_ID` |
+| `bot.study.monitored-group-ids` | 同 `BOT_MONITORED_GROUP_IDS`；为空则处理所有群（不建议生产环境留空） |
+| `bot.study.teacher-ids` | 同 `BOT_TEACHER_IDS`，可发通知生成确认卡 |
+| `bot.study.committee-ids` | 同 `BOT_COMMITTEE_IDS`，可发通知、确认发布与关闭班务 |
 
 `monitored-group-ids` 为空时，`isMonitoredGroup` 会放行所有群，仅适合本地调试。
 
@@ -67,7 +71,15 @@
 2. 若设置 `token`，须与 `ONEBOT_ACCESS_TOKEN` 一致；鉴权头为 `Authorization: Bearer <token>`。
 3. 连接成功日志：`已连接 NapCat：ws://...`
 
-常用动作：`message` 事件（群/私聊）、`send_group_msg`、`send_private_msg`、`get_msg`、`get_image`。
+常用动作：`message` 事件（群/私聊）、`send_group_msg`、`send_private_msg`、`get_msg`、`get_image`、`get_group_member_list`。
+
+## Docker
+
+与 [DEPLOY.md](DEPLOY.md) 配合使用。
+
+- **本机 NapCat + 容器机器人**：`docker compose up -d --build`，`.env` 中 `ONEBOT_WS_URL=ws://host.docker.internal:3001/`，并填写 `BOT_*` 与 `DASHSCOPE_API_KEY`。
+- **服务器 NapCat 与机器人同 compose**：`docker compose --profile server up -d`，`ONEBOT_WS_URL=ws://napcat:3001/`。
+- 数据库挂载到 `./data/qq-study-monitor.db`；NapCat 配置与 QQ 数据在 `./napcat/`（见 DEPLOY，勿提交仓库）。
 
 ## 运行
 

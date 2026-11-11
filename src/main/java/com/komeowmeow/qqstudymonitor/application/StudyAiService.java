@@ -62,10 +62,11 @@ public class StudyAiService {
                 json = json.substring(start, end + 1);
             }
             JsonNode node = objectMapper.readTree(json);
+            String dueAt = DueAtNormalizer.toCanonicalStorage(node.path("due_at").asText(""));
             return new AssignmentExtraction(
                     node.path("title").asText("未命名作业"),
                     node.path("description").asText(""),
-                    node.path("due_at").asText(""),
+                    dueAt,
                     readStringList(node.path("missing_fields")));
         } catch (Exception error) {
             throw new AiReplyException("没能从通知里整理出作业信息，请补充文字说明或更清晰的截图。", error);
@@ -142,5 +143,9 @@ public class StudyAiService {
     }
 
     public record AssignmentExtraction(String title, String description, String dueAt, List<String> missingFields) {
+
+        public AssignmentExtraction withDueAt(String normalizedDueAt) {
+            return new AssignmentExtraction(title, description, normalizedDueAt, missingFields);
+        }
     }
 }

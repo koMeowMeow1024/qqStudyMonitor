@@ -2,11 +2,13 @@ package com.komeowmeow.qqstudymonitor.application;
 
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.AssignmentDraftRepository;
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.AssignmentRepository;
+import com.komeowmeow.qqstudymonitor.infrastructure.persistence.AssignmentRepository.AssignmentRow;
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.CourseMaterialRepository;
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.GroupMemberRepository;
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.MemberStatusRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
@@ -18,6 +20,7 @@ public class GroupClassAffairsService {
     private final MemberStatusRepository memberStatusRepository;
     private final GroupMemberRepository groupMemberRepository;
     private final CourseMaterialRepository courseMaterialRepository;
+    private final GroupRosterSyncService groupRosterSyncService;
 
     public GroupClassAffairsService(
             RoleGuard roleGuard,
@@ -26,7 +29,8 @@ public class GroupClassAffairsService {
             AssignmentRepository assignmentRepository,
             MemberStatusRepository memberStatusRepository,
             GroupMemberRepository groupMemberRepository,
-            CourseMaterialRepository courseMaterialRepository) {
+            CourseMaterialRepository courseMaterialRepository,
+            GroupRosterSyncService groupRosterSyncService) {
         this.roleGuard = roleGuard;
         this.studyAiService = studyAiService;
         this.draftRepository = draftRepository;
@@ -34,6 +38,7 @@ public class GroupClassAffairsService {
         this.memberStatusRepository = memberStatusRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.courseMaterialRepository = courseMaterialRepository;
+        this.groupRosterSyncService = groupRosterSyncService;
     }
 
     public void registerMember(long groupId, long userId, String userName) {
@@ -43,46 +48,52 @@ public class GroupClassAffairsService {
     public String handle(long groupId, long senderId, IncomingMessage message) {
         registerMember(groupId, senderId, message.senderName());
 
-        if (roleGuard.canPublishOrClose(senderId) && isConfirmCommand(message.text())) {
+        String text = message.text();
+        if (roleGuard.canPublishOrClose(senderId) && GroupCommandText.isConfirm(text)) {
             return confirmLatestDraft(groupId, senderId);
         }
 
-        if (roleGuard.isTeacher(senderId) && !message.mentionsBot() && !message.isBlank()) {
+        if (roleGuard.canPublishOrClose(senderId) && GroupCommandText.isClose(text)) {
+            return closeAssignment(groupId, senderId, text);
+        }
+
+        if (message.mentionsBot() && GroupCommandText.isSubmit(text)) {
+            return markSelfSubmitted(groupId, senderId, message.senderName(), text);
+        }
+        if (message.mentionsBot() && GroupCommandText.isPendingQuery(text)) {
+            return formatPendingMembers(groupId);
+        }
+
+        if (roleGuard.canPublishOrClose(senderId) && !message.isBlank() && !GroupCommandText.isClassCommand(text)) {
             return createDraftFromNotice(groupId, senderId, message);
         }
 
         if (!message.mentionsBot()) {
             return null;
         }
-
-        String text = message.text();
-        if (containsSubmitDeclaration(text)) {
-            return markSelfSubmitted(groupId, senderId, message.senderName());
-        }
-        if (containsPendingQuery(text)) {
-            return formatPendingMembers(groupId);
-        }
         return """
                 学习委员班务指令：
-                · 老师发通知/截图 → 整理确认卡，回复「确认发布」后入库
-                · @ 我 +「我交了」→ 标记本人已交
+                · 老师/委员发通知或截图（可 @ 我）→ 整理确认卡，回复「确认发布」后入库
+                · 老师/委员「关闭作业」或「关闭作业 标题」→ 结束对应进行中的班务
+                · @ 我 +「我交了」→ 只有一项时标记本人；多项时加上作业标题
                 · @ 我 +「还没交」→ 查看未交名单
                 """;
     }
 
-    private String createDraftFromNotice(long groupId, long teacherId, IncomingMessage message) {
+    private String createDraftFromNotice(long groupId, long publisherId, IncomingMessage message) {
         StudyAiService.AssignmentExtraction extraction = studyAiService.extractAssignment(message);
         if (!extraction.missingFields().isEmpty()) {
             String missing = String.join("、", extraction.missingFields());
             return "以下信息还不清楚：" + missing + "。请补充后我再生成确认卡。";
         }
-        draftRepository.insert(groupId, teacherId, extraction.title(), extraction.description(), extraction.dueAt());
+        String dueAt = DueAtNormalizer.toCanonicalStorage(extraction.dueAt());
+        draftRepository.insert(groupId, publisherId, extraction.title(), extraction.description(), dueAt);
         courseMaterialRepository.add(
                 groupId,
                 extraction.title(),
                 extraction.description(),
-                "来自老师群通知：" + message.effectiveText());
-        return formatConfirmCard(extraction);
+                "来自群班务通知：" + message.effectiveText());
+        return formatConfirmCard(extraction.withDueAt(dueAt));
     }
 
     private String confirmLatestDraft(long groupId, long senderId) {
@@ -93,24 +104,76 @@ public class GroupClassAffairsService {
         if (draft == null) {
             return "当前没有待确认的作业草稿。";
         }
+        String dueAt = DueAtNormalizer.toCanonicalStorage(draft.dueAt());
+        groupRosterSyncService.syncGroupMembers(groupId);
         long assignmentId = assignmentRepository.publish(
-                groupId, draft.teacherId(), draft.title(), draft.description(), draft.dueAt());
+                groupId, draft.teacherId(), draft.title(), draft.description(), dueAt);
         var members = groupMemberRepository.listMembers(groupId);
         memberStatusRepository.ensurePendingForAllMembers(assignmentId, groupId, members);
         draftRepository.delete(draft.id());
         return "已发布作业：《" + draft.title() + "》"
-                + (draft.dueAt() == null || draft.dueAt().isBlank() ? "" : "，截止 " + draft.dueAt());
+                + (dueAt.isBlank() ? "" : "，截止 " + dueAt);
     }
 
-    private String markSelfSubmitted(long groupId, long userId, String userName) {
+    private String closeAssignment(long groupId, long senderId, String text) {
+        if (!roleGuard.canPublishOrClose(senderId)) {
+            return "你没有权限发布或关闭班务。";
+        }
+        var active = assignmentRepository.findActiveByGroup(groupId);
+        if (active.isEmpty()) {
+            return "当前没有进行中的作业可关闭。";
+        }
+        String hint = GroupCommandText.closeHint(text);
+        AssignmentRow target = pickAssignment(active, hint);
+        if (target == null) {
+            return ambiguousAssignmentMessage("关闭", hint, active);
+        }
+        if (!assignmentRepository.closePublished(target.id())) {
+            return "关闭失败，请稍后再试。";
+        }
+        return "已关闭班务：《" + target.title() + "》，不再跟催与统计为进行中。";
+    }
+
+    private String markSelfSubmitted(long groupId, long userId, String userName, String text) {
         var assignments = assignmentRepository.findActiveByGroup(groupId);
         if (assignments.isEmpty()) {
             return "当前没有进行中的作业。";
         }
-        for (var assignment : assignments) {
-            memberStatusRepository.markSubmitted(assignment.id(), groupId, userId, userName);
+        String hint = GroupCommandText.submitHint(text);
+        AssignmentRow target = pickAssignment(assignments, hint);
+        if (target == null) {
+            return ambiguousAssignmentMessage("提交", hint, assignments);
         }
-        return "已记录你提交了当前进行中的作业（共 " + assignments.size() + " 项）。";
+        memberStatusRepository.markSubmitted(target.id(), groupId, userId, userName);
+        return "已记录你提交了《" + target.title() + "》。";
+    }
+
+    static AssignmentRow pickAssignment(List<AssignmentRow> active, String hint) {
+        if (active.isEmpty()) {
+            return null;
+        }
+        if (hint == null || hint.isBlank()) {
+            return active.size() == 1 ? active.getFirst() : null;
+        }
+        String needle = hint.toLowerCase();
+        List<AssignmentRow> matched = active.stream()
+                .filter(row -> row.title() != null && row.title().toLowerCase().contains(needle))
+                .toList();
+        return matched.size() == 1 ? matched.getFirst() : null;
+    }
+
+    private static String ambiguousAssignmentMessage(String action, String hint, List<AssignmentRow> active) {
+        String listed = formatTitles(active);
+        if (hint == null || hint.isBlank()) {
+            return "有多项进行中的作业，请写明要" + action + "的标题：\n" + listed;
+        }
+        return "没有唯一对应「" + hint + "」的进行中作业。当前有：\n" + listed;
+    }
+
+    private static String formatTitles(List<AssignmentRow> active) {
+        return active.stream()
+                .map(row -> "· " + row.title())
+                .collect(Collectors.joining("\n"));
     }
 
     private String formatPendingMembers(long groupId) {
@@ -145,26 +208,6 @@ public class GroupClassAffairsService {
                 extraction.title(),
                 extraction.description().isBlank() ? "（见通知）" : extraction.description(),
                 extraction.dueAt().isBlank() ? "（待补充）" : extraction.dueAt());
-    }
-
-    private static boolean isConfirmCommand(String text) {
-        if (text == null) {
-            return false;
-        }
-        String normalized = text.replace(" ", "");
-        return normalized.contains("确认发布") || normalized.equals("确认");
-    }
-
-    private static boolean containsSubmitDeclaration(String text) {
-        return text != null && text.replace(" ", "").contains("我交了");
-    }
-
-    private static boolean containsPendingQuery(String text) {
-        if (text == null) {
-            return false;
-        }
-        String normalized = text.replace(" ", "");
-        return normalized.contains("还没交") || normalized.contains("未交");
     }
 
     private static String displayName(String userName, long userId) {

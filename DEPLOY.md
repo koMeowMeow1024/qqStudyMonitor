@@ -18,15 +18,15 @@ src/
 
 ## 配置要点
 
-在 `application.yml` 或环境变量中设置：
+在 `.env` 或环境变量中设置（与 `application.yml` 对应）：
 
-- `bot.qq.self-id`：机器人 QQ
-- `bot.study.monitored-group-ids`：班级群号列表
-- `bot.study.teacher-ids` / `bot.study.committee-ids`：可发布班务的 QQ
+- `BOT_SELF_ID`：机器人 QQ
+- `BOT_MONITORED_GROUP_IDS`：班级群号（逗号分隔）
+- `BOT_TEACHER_IDS` / `BOT_COMMITTEE_IDS`：可发布、确认与关闭班务的 QQ（逗号分隔）
 - `DASHSCOPE_API_KEY`、`ONEBOT_WS_URL`、`ONEBOT_ACCESS_TOKEN`
 
 本地验证：`ONEBOT_WS_URL=ws://host.docker.internal:3001/`，NapCat 监听 `0.0.0.0:3001`。
 
 服务器常驻：`docker compose --profile server up -d`，`.env` 中 `ONEBOT_WS_URL=ws://napcat:3001/`。
 
-更多细节见仓库根目录 `README.md` 的 NapCat 与 Docker 小节。
+更多细节见仓库根目录 [README.md](README.md) 的 **NapCat** 与 **Docker** 小节。

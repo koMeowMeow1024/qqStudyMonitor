@@ -44,23 +44,24 @@ public class MemberStatusRepository {
                 """, (rs, rowNum) -> new PendingMemberRow(rs.getLong("user_id"), rs.getString("user_name")), assignmentId);
     }
 
-    public List<UserAssignmentStatusRow> listPendingForUser(long groupId, long userId) {
+    public List<UserAssignmentStatusRow> listPendingForUser(long userId) {
         return jdbc.query("""
-                SELECT a.id, a.title, a.due_at, s.status
+                SELECT a.id, a.group_id, a.title, a.due_at, s.status
                 FROM assignment a
                 JOIN assignment_member_status s ON s.assignment_id = a.id AND s.user_id = ?
-                WHERE a.group_id = ? AND a.status = 'published' AND s.status = 'pending'
-                ORDER BY a.id DESC
+                WHERE a.status = 'published' AND s.status = 'pending'
+                ORDER BY a.group_id, a.id DESC
                 """, (rs, rowNum) -> new UserAssignmentStatusRow(
                 rs.getLong("id"),
+                rs.getLong("group_id"),
                 rs.getString("title"),
                 rs.getString("due_at"),
-                rs.getString("status")), userId, groupId);
+                rs.getString("status")), userId);
     }
 
     public record PendingMemberRow(long userId, String userName) {
     }
 
-    public record UserAssignmentStatusRow(long assignmentId, String title, String dueAt, String status) {
+    public record UserAssignmentStatusRow(long assignmentId, long groupId, String title, String dueAt, String status) {
     }
 }

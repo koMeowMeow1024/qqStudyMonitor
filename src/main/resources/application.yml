@@ -18,15 +18,15 @@ bot:
     enabled: true
     one-bot-web-socket-url: ${ONEBOT_WS_URL:ws://127.0.0.1:3001/}
     access-token: ${ONEBOT_ACCESS_TOKEN:}
-    self-id: 0
+    self-id: ${BOT_SELF_ID:0}
   limits:
     image-max-bytes-per-image: ${BOT_IMAGE_MAX_BYTES_PER_IMAGE:5242880}
     image-max-total-bytes: ${BOT_IMAGE_MAX_TOTAL_BYTES:8388608}
     private-context-max-messages: ${BOT_PRIVATE_CONTEXT_MAX_MESSAGES:12}
   study:
-    monitored-group-ids: []
-    teacher-ids: []
-    committee-ids: []
+    monitored-group-ids: ${BOT_MONITORED_GROUP_IDS:}
+    teacher-ids: ${BOT_TEACHER_IDS:}
+    committee-ids: ${BOT_COMMITTEE_IDS:}
     reminder-lead-minutes: ${BOT_REMINDER_LEAD_MINUTES:30}
 
 ai:

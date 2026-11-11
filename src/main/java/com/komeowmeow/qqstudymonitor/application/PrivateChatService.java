@@ -6,6 +6,8 @@ import com.komeowmeow.qqstudymonitor.infrastructure.persistence.MemberStatusRepo
 import com.komeowmeow.qqstudymonitor.infrastructure.persistence.PrivateMessageRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class PrivateChatService {
     private final StudyMonitorProperties properties;
@@ -40,8 +42,7 @@ public class PrivateChatService {
             return answer;
         }
 
-        long groupId = primaryGroupId();
-        String materials = formatMaterials(groupId);
+        String materials = formatMaterials();
         var history = privateMessageRepository.recentForUser(userId);
         String answer = studyAiService.tutorReply(message, materials, history);
         privateMessageRepository.append(userId, "assistant", answer);
@@ -49,17 +50,20 @@ public class PrivateChatService {
     }
 
     private String formatHomeworkStatus(long userId) {
-        long groupId = primaryGroupId();
-        if (groupId == 0) {
-            return "尚未配置监控班级群号，请在 application.yml 的 bot.study.monitored-group-ids 中填写。";
-        }
-        var pending = memberStatusRepository.listPendingForUser(groupId, userId);
+        var pending = memberStatusRepository.listPendingForUser(userId).stream()
+                .filter(row -> properties.isMonitoredGroup(row.groupId()))
+                .toList();
         if (pending.isEmpty()) {
             return "你没有未交的作业记录。";
         }
+        boolean multiGroup = pending.stream().map(MemberStatusRepository.UserAssignmentStatusRow::groupId).distinct().count() > 1;
         StringBuilder builder = new StringBuilder("你还未交的作业：\n");
         for (var row : pending) {
-            builder.append("· ").append(row.title());
+            builder.append("· ");
+            if (multiGroup) {
+                builder.append("群 ").append(row.groupId()).append(' ');
+            }
+            builder.append(row.title());
             if (row.dueAt() != null && !row.dueAt().isBlank()) {
                 builder.append("（截止 ").append(row.dueAt()).append('）');
             }
@@ -68,29 +72,30 @@ public class PrivateChatService {
         return builder.toString().trim();
     }
 
-    private String formatMaterials(long groupId) {
-        if (groupId == 0) {
-            return "";
-        }
-        var materials = courseMaterialRepository.listRecent(groupId, 5);
-        if (materials.isEmpty()) {
-            return "";
-        }
+    private String formatMaterials() {
+        List<Long> groups = properties.getMonitoredGroupIds();
         StringBuilder builder = new StringBuilder();
+        if (groups.isEmpty()) {
+            appendMaterials(builder, courseMaterialRepository.listRecent(8));
+            return builder.toString();
+        }
+        for (Long groupId : groups) {
+            appendMaterials(builder, courseMaterialRepository.listRecent(groupId, 5));
+        }
+        return builder.toString();
+    }
+
+    private static void appendMaterials(StringBuilder builder, List<CourseMaterialRepository.MaterialRow> materials) {
         for (var row : materials) {
+            if (row.groupId() != 0) {
+                builder.append("[群 ").append(row.groupId()).append("] ");
+            }
             builder.append('-').append(row.title()).append("：").append(row.content());
             if (row.sourceNote() != null && !row.sourceNote().isBlank()) {
                 builder.append("（").append(row.sourceNote()).append(')');
             }
             builder.append('\n');
         }
-        return builder.toString();
-    }
-
-    private long primaryGroupId() {
-        return properties.getMonitoredGroupIds().isEmpty()
-                ? 0
-                : properties.getMonitoredGroupIds().getFirst();
     }
 
     private static boolean isHomeworkStatusQuery(String text) {

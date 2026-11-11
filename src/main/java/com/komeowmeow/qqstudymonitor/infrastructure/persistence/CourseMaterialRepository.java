@@ -29,9 +29,25 @@ public class CourseMaterialRepository {
                 """, (rs, rowNum) -> new MaterialRow(
                 rs.getString("title"),
                 rs.getString("content"),
-                rs.getString("source_note")), groupId, limit);
+                rs.getString("source_note"),
+                groupId), groupId, limit);
     }
 
-    public record MaterialRow(String title, String content, String sourceNote) {
+    public List<MaterialRow> listRecent(int limit) {
+        return jdbc.query("""
+                SELECT title, content, source_note, group_id FROM course_material
+                ORDER BY id DESC
+                LIMIT ?
+                """, (rs, rowNum) -> new MaterialRow(
+                rs.getString("title"),
+                rs.getString("content"),
+                rs.getString("source_note"),
+                rs.getLong("group_id")), limit);
+    }
+
+    public record MaterialRow(String title, String content, String sourceNote, long groupId) {
+        public MaterialRow(String title, String content, String sourceNote) {
+            this(title, content, sourceNote, 0);
+        }
     }
 }
